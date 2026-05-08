@@ -246,7 +246,7 @@ def create_vectorstore(parent_docs, embeddings):
 
 
 # create parent document retriever
-def create_parent_retriever(vectorstore, parent_docs, add_documents=True):
+def create_parent_retriever(vectorstore, parent_docs, add_documents=False):
     store = InMemoryStore()
     child_splitter = RecursiveCharacterTextSplitter(chunk_size=500,chunk_overlap=100)
     parent_splitter = RecursiveCharacterTextSplitter(chunk_size=1500,chunk_overlap=200)
@@ -278,7 +278,7 @@ def build_rag_pipeline():
     parent_docs = create_parent_docs(structured_docs)
     embeddings = load_embedding_model()
     vectorstore = create_vectorstore(parent_docs,embeddings)
-    parent_retriever = create_parent_retriever(vectorstore,parent_docs, add_documents=True)
+    parent_retriever = create_parent_retriever(vectorstore,parent_docs, add_documents=False)
     bm25_retriever = create_bm25_retriever(parent_docs)
 
     return {
