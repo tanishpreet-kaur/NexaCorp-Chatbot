@@ -19,6 +19,7 @@ load_dotenv()
 # file path
 file_path = "NexaCorp_Enterprise_Policy_Handbook_v5.2.docx"
 
+
 # load the required document
 def load_document(file_path):
     try:
@@ -30,6 +31,7 @@ def load_document(file_path):
         return docs
     except Exception as e:
         raise RuntimeError(f"Failed to load document: {file_path}") from e
+    
     
 # use regular expressions to remove header/footer noise
 def is_header_footer(text):
@@ -43,6 +45,7 @@ def is_header_footer(text):
     ]
     return any(re.search(p, text, re.IGNORECASE) for p in NOISE_PATTERNS)
 
+
 # uses regular expression to check if line belongs to TOC or not
 def is_toc_line(text):
     text = text.strip()
@@ -51,6 +54,7 @@ def is_toc_line(text):
         text,
         re.IGNORECASE
     ))
+    
     
 # clean the documents by removing unwanted data
 def clean_documents(docs):
@@ -63,7 +67,7 @@ def clean_documents(docs):
         lower = text.lower()
         category = doc.metadata.get("category", "")
         text = re.sub(r"\s+", " ", text)
-
+        
         if category in ["Header", "Footer"]:
             removed += 1
             continue
@@ -79,7 +83,7 @@ def clean_documents(docs):
         if skip_toc:
             if re.match(r"^1\.\s", text): 
                 skip_toc = False
-            else:
+            elif is_toc_line(text):
                 continue
 
         if category == "Table":
@@ -91,6 +95,7 @@ def clean_documents(docs):
         cleaned_docs.append(doc)
         
     return cleaned_docs
+
 
 # create a structured format for cleaned documents
 def build_structured_docs(docs_clean):
@@ -152,6 +157,139 @@ def build_structured_docs(docs_clean):
             })
             continue
         buffer.append(text)
-
     flush_buffer()
     return structured_docs
+
+
+# create parent documents for hierarchical retrieval
+def create_parent_docs(structured_docs):
+    parent_docs = []
+    for item in structured_docs:   
+        doc_id = str(uuid.uuid4())
+        
+        full_content = f"""
+            Part: {item.get("part", "")}
+            Section: {item.get("section", "")}
+            Subsection: {item.get("subsection", "")}
+            {item["content"]}
+            """.strip()
+
+        parent_docs.append(
+            Document(
+                page_content=full_content,
+                metadata={
+                    "doc_id": doc_id,
+                    "part": item.get("part", ""),
+                    "section": item.get("section", ""),
+                    "subsection": item.get("subsection", ""),
+                    "raw_content": item["content"],
+                    "type": item.get("type", "text")
+                }
+            )
+        )
+    return parent_docs
+
+
+# create BM25 retriever
+def create_bm25_retriever(parent_docs):
+    bm25_retriever = BM25Retriever.from_documents(parent_docs)
+    bm25_retriever.k = 5
+    return bm25_retriever
+
+# initialize embedding model
+def load_embedding_model():
+    embeddings = HuggingFaceEmbeddings(
+        model_name="BAAI/bge-base-en-v1.5",
+        model_kwargs={"device": "cpu"},   
+        encode_kwargs={
+            "normalize_embeddings": True,
+            "batch_size": 32
+        }
+    )
+    return embeddings
+
+
+# create pinecone vector store
+def create_vectorstore(parent_docs, embeddings):
+    pc = Pinecone()
+    index_name = "rag-chatbot"
+    if index_name not in [i.name for i in pc.list_indexes()]:
+        pc.create_index(
+            name=index_name,
+            dimension=768,
+            metric="cosine",
+            spec=ServerlessSpec(
+                cloud="aws",
+                region="us-east-1"
+            )
+        )
+    index = pc.Index(index_name)
+
+    # create vector store
+    vectorstore = PineconeVectorStore(
+        index=index,
+        embedding=embeddings
+    )
+    stats = index.describe_index_stats()
+    total_vectors = stats.get("total_vector_count", 0)
+    
+    if total_vectors == 0:
+        print("Uploading documents to Pinecone...")
+        vectorstore.add_documents(
+            parent_docs,
+            ids=[doc.metadata["doc_id"] for doc in parent_docs]
+        )
+        print("Upload complete.")
+    else:
+        print("Using existing Pinecone index.")
+    return vectorstore
+
+
+# create parent document retriever
+def create_parent_retriever(vectorstore, parent_docs, add_documents=True):
+    store = InMemoryStore()
+    child_splitter = RecursiveCharacterTextSplitter(chunk_size=500,chunk_overlap=100)
+    parent_splitter = RecursiveCharacterTextSplitter(chunk_size=1500,chunk_overlap=200)
+
+    # initialize retriever
+    parent_retriever = ParentDocumentRetriever(
+        vectorstore=vectorstore,
+        docstore=store,
+        child_splitter=child_splitter,
+        parent_splitter=parent_splitter
+    )
+    
+    # only add documents if needed
+    if add_documents:
+        print("Adding parent documents...")
+        parent_retriever.add_documents(parent_docs)
+        print("Parent documents added.")
+    else:
+        print("Using existing parent documents.")
+
+    return parent_retriever
+
+
+# FINAL RAG PIPELINE
+def build_rag_pipeline():
+    docs = load_document(file_path)
+    cleaned_docs = clean_documents(docs)
+    structured_docs = build_structured_docs(cleaned_docs)
+    parent_docs = create_parent_docs(structured_docs)
+    embeddings = load_embedding_model()
+    vectorstore = create_vectorstore(parent_docs,embeddings)
+    parent_retriever = create_parent_retriever(vectorstore,parent_docs, add_documents=True)
+    bm25_retriever = create_bm25_retriever(parent_docs)
+
+    return {
+        "vectorstore": vectorstore,
+        "parent_retriever": parent_retriever,
+        "bm25_retriever": bm25_retriever,
+        "parent_docs": parent_docs
+    }
+    
+
+pipeline = build_rag_pipeline()
+parent_retriever = pipeline["parent_retriever"]
+bm25_retriever = pipeline["bm25_retriever"]
+vectorstore = pipeline["vectorstore"]
