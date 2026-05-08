@@ -97,6 +97,8 @@ def query_decomposition(state: ChatbotState):
     
 # generate answer node
 def generate_answer(state: ChatbotState):
+    query = state["query"]
+    
     result = []
     return result
 
