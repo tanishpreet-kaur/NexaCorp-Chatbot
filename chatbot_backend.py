@@ -9,7 +9,7 @@ from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from pydantic import BaseModel, Field
 from typing import List, TypedDict, Literal
-from langgraph.graph import StateGraph, END
+from langgraph.graph import StateGraph, START, END
 
 # load environment variables
 load_dotenv()
@@ -21,31 +21,23 @@ llm = init_chat_model("google_genai:gemini-2.5-flash-lite")
 class ChatbotState(TypedDict):
     query: str
     subqueries: List[str] | None
-    retrieved_docs: list
+    needs_decomposition: str
     reranked_docs: list
     final_answer: str
-    
-# hybrid retriever node
-def hybrid_retriever(state: ChatbotState):
-    query = state["query"]
-    hybrid_retriever = EnsembleRetriever(
-        retrievers=[bm25_retriever, parent_retriever],
-        weights=[0.4, 0.6]
-    )
-    docs = hybrid_retriever.invoke(query)
-    return {"retrieved_docs": docs} 
 
 # reranker node
 def reranker(state: ChatbotState):
     query = state["query"]
     reranker_model = HuggingFaceCrossEncoder(model_name="BAAI/bge-reranker-base")
-    compressor = CrossEncoderReranker(model=reranker_model)
-    
+    compressor = CrossEncoderReranker(model=reranker_model, top_n=5)
+    ensemble_retriever = EnsembleRetriever(
+        retrievers=[bm25_retriever, parent_retriever],
+        weights=[0.4, 0.6]
+    )
     compression_retriever = ContextualCompressionRetriever(
-        base_retriever=hybrid_retriever,
+        base_retriever=ensemble_retriever,
         base_compressor=compressor
     )
-    
     reranked_docs = compression_retriever.invoke(query)
     return {"reranked_docs": reranked_docs}
 
@@ -98,17 +90,44 @@ def query_decomposition(state: ChatbotState):
 # generate answer node
 def generate_answer(state: ChatbotState):
     query = state["query"]
+    docs = state["reranked_docs"]
+    context = "\n\n".join([doc.page_content for doc in docs])
     
-    result = []
-    return result
+    answer_prompt = PromptTemplate(
+        template="""
+            You are a helpful AI assistant.
+            Answer ONLY using the provided context.
+            Do not create content that is not supported by the context. If you don't know the answer, say you don't know.
+            Context:
+            {context}
+            Question:
+            {query}
+            """,
+        input_variables=["context", "query"]
+    )
+
+    chain = (answer_prompt | llm | StrOutputParser())
+    result = chain.invoke({"context": context, "query": query})
+    return {"final_answer": result}
 
 # initialize state graph
 graph = StateGraph(ChatbotState)
 
 # create nodes
-graph.add_node("hybrid_retriever", hybrid_retriever)
 graph.add_node("reranker", reranker)
 graph.add_node("query_decomposition", query_decomposition)
-graph.add_node("answer generation", generate_answer)
+graph.add_node("answer_generation", generate_answer)
 
 # create edges
+graph.add_edge(START, "query_decomposition")
+graph.add_edge("query_decomposition", "reranker")
+graph.add_edge("reranker", "answer_generation")
+graph.add_edge("answer_generation", END)
+
+app = graph.compile()
+
+result = app.invoke({
+    "query": "Explain company values and organisational structure"
+})
+
+print(result["final_answer"])

@@ -212,7 +212,7 @@ def load_embedding_model():
 # create pinecone vector store
 def create_vectorstore(parent_docs, embeddings):
     pc = Pinecone()
-    index_name = "rag-chatbot"
+    index_name = "nexacorp-chatbot"
     if index_name not in [i.name for i in pc.list_indexes()]:
         pc.create_index(
             name=index_name,
