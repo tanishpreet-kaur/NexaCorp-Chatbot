@@ -77,8 +77,7 @@ def query_decomposition(state: ChatbotState):
 
         Only return structured output.
 
-        User Query: {query}
-        """
+        User Query: {query}"""
 
     structured_llm = llm.with_structured_output(QueryAnalysis)
     result = (decomposition_prompt | structured_llm).invoke({"query": query})
