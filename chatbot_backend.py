@@ -76,7 +76,6 @@ def query_decomposition(state: ChatbotState):
         - return empty subqueries list
 
         Only return structured output.
-
         User Query: {query}"""
 
     structured_llm = llm.with_structured_output(QueryAnalysis)
