@@ -1,6 +1,6 @@
 # import necessary libraries
 import re
-import uuid
+import hashlib
 from dotenv import load_dotenv
 from langchain_community.document_loaders import UnstructuredWordDocumentLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -8,7 +8,8 @@ from langchain_core.documents import Document
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.retrievers import BM25Retriever
 from langchain_classic.retrievers import ParentDocumentRetriever
-from langchain_core.stores import InMemoryStore
+from langchain_classic.storage import LocalFileStore
+from langchain_classic.storage._lc_store import create_kv_docstore
 from pinecone import Pinecone
 from langchain_pinecone import PineconeVectorStore
 from pinecone import ServerlessSpec
@@ -164,21 +165,22 @@ def build_structured_docs(docs_clean):
 # create parent documents for hierarchical retrieval
 def create_parent_docs(structured_docs):
     parent_docs = []
-    for item in structured_docs:   
-        doc_id = str(uuid.uuid4())
-        
+    for item in structured_docs:           
         full_content = f"""
             Part: {item.get("part", "")}
             Section: {item.get("section", "")}
             Subsection: {item.get("subsection", "")}
             {item["content"]}
             """.strip()
+        
+        doc_id = hashlib.md5(full_content.encode()).hexdigest()
 
         parent_docs.append(
             Document(
                 page_content=full_content,
                 metadata={
                     "doc_id": doc_id,
+                    "source": "NexaCorp Policy Handbook v5.2",
                     "part": item.get("part", ""),
                     "section": item.get("section", ""),
                     "subsection": item.get("subsection", ""),
@@ -210,10 +212,15 @@ def load_embedding_model():
 
 
 # create pinecone vector store
-def create_vectorstore(parent_docs, embeddings):
+def create_vectorstore(embeddings):
     pc = Pinecone()
-    index_name = "nexacorp-chatbot"
-    if index_name not in [i.name for i in pc.list_indexes()]:
+    index_name = "nexacorp"
+    namespace = "hr-policy-v2"
+    existing_indexes = [i.name for i in pc.list_indexes()]
+
+    # create index if not exists
+    if index_name not in existing_indexes:
+        print("Creating Pinecone index...")
         pc.create_index(
             name=index_name,
             dimension=768,
@@ -224,43 +231,31 @@ def create_vectorstore(parent_docs, embeddings):
             )
         )
     index = pc.Index(index_name)
-
-    # create vector store
     vectorstore = PineconeVectorStore(
         index=index,
-        embedding=embeddings
+        embedding=embeddings,
+        namespace=namespace
     )
-    stats = index.describe_index_stats()
-    total_vectors = stats.get("total_vector_count", 0)
-    
-    if total_vectors == 0:
-        print("Uploading documents to Pinecone...")
-        vectorstore.add_documents(
-            parent_docs,
-            ids=[doc.metadata["doc_id"] for doc in parent_docs]
-        )
-        print("Upload complete.")
-    else:
-        print("Using existing Pinecone index.")
     return vectorstore
 
 
 # create parent document retriever
-def create_parent_retriever(vectorstore, parent_docs, add_documents=False):
-    store = InMemoryStore()
-    child_splitter = RecursiveCharacterTextSplitter(chunk_size=500,chunk_overlap=100)
-    parent_splitter = RecursiveCharacterTextSplitter(chunk_size=1500,chunk_overlap=200)
+def create_parent_retriever(vectorstore, parent_docs):
+    fs = LocalFileStore("./parent_doc_store")
+    store = create_kv_docstore(fs)
+    child_splitter = RecursiveCharacterTextSplitter(chunk_size=400, chunk_overlap=80)
+    parent_splitter = RecursiveCharacterTextSplitter(chunk_size=1200, chunk_overlap=150)
 
-    # initialize retriever
     parent_retriever = ParentDocumentRetriever(
         vectorstore=vectorstore,
         docstore=store,
         child_splitter=child_splitter,
-        parent_splitter=parent_splitter
+        parent_splitter=parent_splitter,
+        search_kwargs={"k": 10}
     )
-    
-    # only add documents if needed
-    if add_documents:
+
+    ADD_PARENT_DOCS = False
+    if ADD_PARENT_DOCS:
         print("Adding parent documents...")
         parent_retriever.add_documents(parent_docs)
         print("Parent documents added.")
@@ -277,8 +272,8 @@ def build_rag_pipeline():
     structured_docs = build_structured_docs(cleaned_docs)
     parent_docs = create_parent_docs(structured_docs)
     embeddings = load_embedding_model()
-    vectorstore = create_vectorstore(parent_docs,embeddings)
-    parent_retriever = create_parent_retriever(vectorstore,parent_docs, add_documents=False)
+    vectorstore = create_vectorstore(embeddings)
+    parent_retriever = create_parent_retriever(vectorstore, parent_docs)
     bm25_retriever = create_bm25_retriever(parent_docs)
 
     return {
