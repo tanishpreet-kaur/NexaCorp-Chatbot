@@ -19,7 +19,7 @@ llm = init_chat_model("google_genai:gemini-2.5-flash-lite")
 class ChatbotState(TypedDict):
     query: str
     subqueries: List[str] | None
-    needs_decomposition: str
+    needs_decomposition: Literal["yes", "no"]
     reranked_docs: list
     final_answer: str
 
@@ -79,7 +79,7 @@ def query_decomposition(state: ChatbotState):
         User Query: {query}"""
 
     structured_llm = llm.with_structured_output(QueryAnalysis)
-    result = (decomposition_prompt | structured_llm).invoke({"query": query})
+    result = structured_llm.invoke(decomposition_prompt)
 
     if result.needs_decomposition == "no":
         return {"needs_decomposition": "no", "subqueries": [query]}
@@ -89,7 +89,9 @@ def query_decomposition(state: ChatbotState):
 def generate_answer(state: ChatbotState):
     query = state["query"]
     docs = state["reranked_docs"]
-    context = "\n\n".join([doc.page_content for doc in docs])
+    context = "\n\n".join(
+        [doc.page_content for doc in docs]
+    )
 
     answer_prompt = f"""
         You are NexaCorp's HR assistant.
@@ -102,6 +104,7 @@ def generate_answer(state: ChatbotState):
         5. Prioritize actionable information.
         6. If information is missing, say so clearly.
         7. Use citations where available.
+        8. Use information only from the context and give relevant answers only.
 
         Context:
         {context}
@@ -110,10 +113,8 @@ def generate_answer(state: ChatbotState):
         {query}
         """
 
-    result = (answer_prompt | llm | StrOutputParser()).invoke({
-        "context": context,
-        "query": query
-    })
+    result = llm.invoke(answer_prompt).content
+
     return {"final_answer": result}
 
 # initialize state graph
@@ -130,12 +131,12 @@ graph.add_edge("query_decomposition", "reranker")
 graph.add_edge("reranker", "answer_generation")
 graph.add_edge("answer_generation", END)
 
-app = graph.compile()
+chatbot = graph.compile()
 
 while True:
     query = input("\nQuestion: ")
     if query.lower() == "exit":
         break
-    result = app.invoke({"query": query})
+    result = chatbot.invoke({"query": query})
     print("\nAnswer:")
     print(result["final_answer"])
