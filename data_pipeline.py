@@ -251,7 +251,7 @@ def create_parent_retriever(vectorstore, parent_docs):
         docstore=store,
         child_splitter=child_splitter,
         parent_splitter=parent_splitter,
-        search_kwargs={"k": 10}
+        search_kwargs={"k": 5}
     )
 
     ADD_PARENT_DOCS = False

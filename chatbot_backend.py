@@ -25,7 +25,7 @@ class ChatbotState(TypedDict):
 
 # initialize retrievers and compressor
 reranker_model = HuggingFaceCrossEncoder(model_name="BAAI/bge-reranker-base")
-compressor = CrossEncoderReranker(model=reranker_model, top_n=5)
+compressor = CrossEncoderReranker(model=reranker_model, top_n=4)
 ensemble_retriever = EnsembleRetriever(
     retrievers=[bm25_retriever, parent_retriever],
     weights=[0.4, 0.6]
@@ -96,15 +96,18 @@ def generate_answer(state: ChatbotState):
     answer_prompt = f"""
         You are NexaCorp's HR assistant.
 
-        Answer rules:
-        1. Give a direct answer in 1–2 sentences first.
-        2. Summarize important points using bullet points.
-        3. Avoid copying large chunks from documents.
-        4. Keep answers under 150–200 words unless detailed explanation is requested.
-        5. Prioritize actionable information.
-        6. If information is missing, say so clearly.
-        7. Use citations where available.
-        8. Use information only from the context and give relevant answers only.
+        Strict rules:
+        1. Answer ONLY using information present in the provided context.
+        2. Do NOT use prior knowledge or make assumptions.
+        3. If the answer cannot be found in the context, respond exactly: "I could not find this information in the provided documents."
+        4. Do NOT infer missing details from related information.
+        5. Do NOT combine multiple policies unless the context explicitly connects them.
+        6. Give a direct answer in 1–2 sentences first.
+        7. Then summarize important points using bullet points.
+        8. Keep the response under 200-250 words unless detailed explanation is requested.
+        9. Avoid copying large portions of the source text.
+        10. Include only information relevant to the question.
+        11. If retrieved documents contain conflicting information, mention the conflict instead of choosing one.
 
         Context:
         {context}
