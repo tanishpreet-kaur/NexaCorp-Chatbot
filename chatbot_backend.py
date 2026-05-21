@@ -89,25 +89,31 @@ def query_decomposition(state: ChatbotState):
 def generate_answer(state: ChatbotState):
     query = state["query"]
     docs = state["reranked_docs"]
-    context = "\n\n".join(
-        [doc.page_content for doc in docs]
-    )
+    context = "\n\n".join([
+        f"""
+        Part: {doc.metadata.get("part","")}
+        Section: {doc.metadata.get("section","")}
+        Subsection: {doc.metadata.get("subsection","")}
+
+        Content:
+        {doc.page_content}
+        """
+        for doc in docs
+    ])
 
     answer_prompt = f"""
         You are NexaCorp's HR assistant.
 
-        Strict rules:
-        1. Answer ONLY using information present in the provided context.
-        2. Do NOT use prior knowledge or make assumptions.
-        3. If the answer cannot be found in the context, respond exactly: "I could not find this information in the provided documents."
-        4. Do NOT infer missing details from related information.
-        5. Do NOT combine multiple policies unless the context explicitly connects them.
-        6. Give a direct answer in 1–2 sentences first.
-        7. Then summarize important points using bullet points.
-        8. Keep the response under 200-250 words unless detailed explanation is requested.
-        9. Avoid copying large portions of the source text.
-        10. Include only information relevant to the question.
-        11. If retrieved documents contain conflicting information, mention the conflict instead of choosing one.
+        Rules:
+        1. Answer only from the provided context.
+        2. If the answer is unavailable, reply exactly: "I could not find this information in the provided documents."
+        3. Do not assume or infer missing details.
+        4. Start with a direct answer (1–2 sentences), then add concise bullet points.
+        5. Keep responses between 200-250 words.
+        6. Mention conflicts if retrieved information is inconsistent.
+        7. Add source citations using: [Section: <section number and name>, Subsection: <subsection number and name>]. Not parts.
+        8. If multiple lines belong to same section/subsection, cite only once with the most relevant line's section/subsection.
+        9. Avoid copying large text from the context.
 
         Context:
         {context}

@@ -214,8 +214,8 @@ def load_embedding_model():
 # create pinecone vector store
 def create_vectorstore(embeddings):
     pc = Pinecone()
-    index_name = "nexacorp"
-    namespace = "hr-policy-v2"
+    index_name = "nexacorp-rag-chatbot"
+    namespace = "hr-policy-v1"
     existing_indexes = [i.name for i in pc.list_indexes()]
 
     # create index if not exists
@@ -251,7 +251,15 @@ def create_parent_retriever(vectorstore, parent_docs):
         docstore=store,
         child_splitter=child_splitter,
         parent_splitter=parent_splitter,
-        search_kwargs={"k": 5}
+        search_kwargs={"k": 5},
+        child_metadata_fields=[
+            "doc_id",
+            "source",
+            "part",
+            "section",
+            "subsection",
+            "type"
+        ]
     )
 
     ADD_PARENT_DOCS = False
