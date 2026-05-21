@@ -1,13 +1,13 @@
-from data_pipeline import parent_retriever, bm25_retriever, vectorstore
+from data_pipeline import parent_retriever, bm25_retriever
 from dotenv import load_dotenv
 from langchain_classic.retrievers import EnsembleRetriever, ContextualCompressionRetriever
 from langchain_community.cross_encoders import HuggingFaceCrossEncoder
 from langchain_classic.retrievers.document_compressors import CrossEncoderReranker
 from langchain.chat_models import init_chat_model
-from langchain_core.output_parsers import StrOutputParser
 from pydantic import BaseModel, Field
 from typing import List, TypedDict, Literal
 from langgraph.graph import StateGraph, START, END
+from langfuse.decorators import observe 
 
 # load environment variables
 load_dotenv()
@@ -32,6 +32,7 @@ ensemble_retriever = EnsembleRetriever(
 )
 
 # reranker node
+@observe
 def reranker(state: ChatbotState):
     queries = state.get("subqueries") or [state["query"]]
     compression_retriever = ContextualCompressionRetriever(
@@ -56,6 +57,7 @@ class QueryAnalysis(BaseModel):
     needs_decomposition: Literal["yes", "no"] = Field(description="Whether the query should be decomposed into multiple subqueries")
     subqueries: List[str] = Field(description="List of generated subqueries")
 
+@observe
 def query_decomposition(state: ChatbotState):
     query = state["query"]
     decomposition_prompt = f"""You are a query analysis assistant for a RAG chatbot.
@@ -86,34 +88,29 @@ def query_decomposition(state: ChatbotState):
     return {"needs_decomposition": "yes", "subqueries": result.subqueries}
     
 # generate answer node
+@observe
 def generate_answer(state: ChatbotState):
     query = state["query"]
     docs = state["reranked_docs"]
-    context = "\n\n".join([
-        f"""
-        Part: {doc.metadata.get("part","")}
-        Section: {doc.metadata.get("section","")}
-        Subsection: {doc.metadata.get("subsection","")}
-
-        Content:
-        {doc.page_content}
-        """
-        for doc in docs
-    ])
+    context = "\n\n".join(
+        [doc.page_content for doc in docs]
+    )
 
     answer_prompt = f"""
         You are NexaCorp's HR assistant.
 
         Rules:
-        1. Answer only from the provided context.
-        2. If the answer is unavailable, reply exactly: "I could not find this information in the provided documents."
-        3. Do not assume or infer missing details.
-        4. Start with a direct answer (1–2 sentences), then add concise bullet points.
-        5. Keep responses between 200-250 words.
-        6. Mention conflicts if retrieved information is inconsistent.
-        7. Add source citations using: [Section: <section number and name>, Subsection: <subsection number and name>]. Not parts.
-        8. If multiple lines belong to same section/subsection, cite only once with the most relevant line's section/subsection.
-        9. Avoid copying large text from the context.
+        1. Answer only using the provided context.
+        2. If the information is unavailable, reply exactly: "I could not find this information in the provided documents."
+        3. Do not use outside knowledge or infer missing details.
+        4. Start with a direct answer in 1–2 sentences.
+        5. Then provide concise bullet points grouped by topic.
+        6. Keep the response between 200-250 words.
+        7. Mention conflicting information if present.
+        8. Avoid copying large text from the context.
+        9. Add citations in this format: [Section: <section number and name>, Subsection: <subsection number and name>]. 
+        10. If multiple statements come from the same subsection, group them together and cite only once at the end of that group.
+        11. Do not repeat identical citations across bullets.
 
         Context:
         {context}
@@ -123,8 +120,16 @@ def generate_answer(state: ChatbotState):
         """
 
     result = llm.invoke(answer_prompt).content
-
-    return {"final_answer": result}
+    return {
+    "final_answer": result,
+    "sources": [
+        {
+            "section": doc.metadata.get("section"),
+            "subsection": doc.metadata.get("subsection")
+        }
+        for doc in docs
+    ]
+    }
 
 # initialize state graph
 graph = StateGraph(ChatbotState)
@@ -142,10 +147,6 @@ graph.add_edge("answer_generation", END)
 
 chatbot = graph.compile()
 
-while True:
-    query = input("\nQuestion: ")
-    if query.lower() == "exit":
-        break
+def ask_chatbot(query: str):
     result = chatbot.invoke({"query": query})
-    print("\nAnswer:")
-    print(result["final_answer"])
+    return result["final_answer"]
