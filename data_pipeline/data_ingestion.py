@@ -18,7 +18,7 @@ from pinecone import ServerlessSpec
 load_dotenv()
 
 # file path
-file_path = "NexaCorp_Enterprise_Policy_Handbook_v5.2.docx"
+file_path = "data/NexaCorp_Enterprise_Policy_Handbook_v5.2.docx"
 
 
 # load the required document

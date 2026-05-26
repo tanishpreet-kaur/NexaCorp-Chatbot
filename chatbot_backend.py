@@ -1,4 +1,4 @@
-from data_pipeline import parent_retriever, bm25_retriever
+from data_pipeline.data_ingestion import parent_retriever, bm25_retriever
 from dotenv import load_dotenv
 from langchain_classic.retrievers import EnsembleRetriever, ContextualCompressionRetriever
 from langchain_community.cross_encoders import HuggingFaceCrossEncoder
@@ -20,6 +20,7 @@ class ChatbotState(TypedDict):
     query: str
     subqueries: List[str] | None
     needs_decomposition: Literal["yes", "no"]
+    retrieved_docs: list
     reranked_docs: list
     final_answer: str
 
@@ -32,7 +33,6 @@ ensemble_retriever = EnsembleRetriever(
 )
 
 # reranker node
-@observe
 def reranker(state: ChatbotState):
     queries = state.get("subqueries") or [state["query"]]
     compression_retriever = ContextualCompressionRetriever(
@@ -57,7 +57,6 @@ class QueryAnalysis(BaseModel):
     needs_decomposition: Literal["yes", "no"] = Field(description="Whether the query should be decomposed into multiple subqueries")
     subqueries: List[str] = Field(description="List of generated subqueries")
 
-@observe
 def query_decomposition(state: ChatbotState):
     query = state["query"]
     decomposition_prompt = f"""You are a query analysis assistant for a RAG chatbot.
@@ -88,7 +87,6 @@ def query_decomposition(state: ChatbotState):
     return {"needs_decomposition": "yes", "subqueries": result.subqueries}
     
 # generate answer node
-@observe
 def generate_answer(state: ChatbotState):
     query = state["query"]
     docs = state["reranked_docs"]
