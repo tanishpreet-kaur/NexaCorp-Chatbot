@@ -295,4 +295,3 @@ def build_rag_pipeline():
 pipeline = build_rag_pipeline()
 parent_retriever = pipeline["parent_retriever"]
 bm25_retriever = pipeline["bm25_retriever"]
-vectorstore = pipeline["vectorstore"]
