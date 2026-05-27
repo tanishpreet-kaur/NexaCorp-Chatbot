@@ -197,7 +197,7 @@ def create_parent_docs(structured_docs):
 # create BM25 retriever
 def create_bm25_retriever(parent_docs):
     bm25_retriever = BM25Retriever.from_documents(parent_docs)
-    bm25_retriever.k = 10
+    bm25_retriever.k = 5
     return bm25_retriever
 
 # initialize embedding model
@@ -253,7 +253,7 @@ def create_parent_retriever(vectorstore, parent_docs):
         docstore=store,
         child_splitter=child_splitter,
         parent_splitter=parent_splitter,
-        search_kwargs={"k": 10},
+        search_kwargs={"k": 5},
         child_metadata_fields=[
             "doc_id",
             "source",
