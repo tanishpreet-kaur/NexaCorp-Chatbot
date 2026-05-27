@@ -11,7 +11,7 @@ graph = StateGraph(ChatbotState)
 graph.add_node("retrieve", retrieve)
 graph.add_node("reranker", reranker)
 graph.add_node("query_decomposition", query_decomposition)
-graph.add_node("answer_generation", generate_answer)
+graph.add_node("generate_answer", generate_answer)
 
 # create edges
 graph.set_entry_point("query_decomposition")

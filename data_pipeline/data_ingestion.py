@@ -1,6 +1,7 @@
 # import necessary libraries
 import re
 import hashlib
+from pathlib import Path
 from dotenv import load_dotenv
 from langchain_community.document_loaders import UnstructuredWordDocumentLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -18,14 +19,15 @@ from pinecone import ServerlessSpec
 load_dotenv()
 
 # file path
-file_path = "data/NexaCorp_Enterprise_Policy_Handbook_v5.2.docx"
+BASE_DIR = Path(__file__).resolve().parent.parent
 
+file_path = BASE_DIR / "data" / "NexaCorp_Enterprise_Policy_Handbook_v5.2.docx"
 
 # load the required document
 def load_document(file_path):
     try:
         loader = UnstructuredWordDocumentLoader(
-            file_path,
+            str(file_path),
             mode="elements"                                 
         )
         docs = loader.load()
@@ -195,7 +197,7 @@ def create_parent_docs(structured_docs):
 # create BM25 retriever
 def create_bm25_retriever(parent_docs):
     bm25_retriever = BM25Retriever.from_documents(parent_docs)
-    bm25_retriever.k = 5
+    bm25_retriever.k = 10
     return bm25_retriever
 
 # initialize embedding model
@@ -215,7 +217,7 @@ def load_embedding_model():
 def create_vectorstore(embeddings):
     pc = Pinecone()
     index_name = "nexacorp-rag-chatbot"
-    namespace = "hr-policy-v1"
+    namespace = "hr-policy-v2"
     existing_indexes = [i.name for i in pc.list_indexes()]
 
     # create index if not exists
@@ -251,7 +253,7 @@ def create_parent_retriever(vectorstore, parent_docs):
         docstore=store,
         child_splitter=child_splitter,
         parent_splitter=parent_splitter,
-        search_kwargs={"k": 5},
+        search_kwargs={"k": 10},
         child_metadata_fields=[
             "doc_id",
             "source",
